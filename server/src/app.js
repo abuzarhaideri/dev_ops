@@ -1,8 +1,9 @@
 const express = require('express');
 const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
 const productRoutes = require('./routes/productRoutes');
 
-const path = require('path');
 const app = express();
 
 // CORS Configuration - Allow frontend origins
@@ -25,9 +26,6 @@ app.use(cors({
   },
   credentials: true
 }));
-
-const fs = require('fs');
-const path = require('path');
 
 app.use(express.json());
 
