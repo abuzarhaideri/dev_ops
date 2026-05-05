@@ -4,24 +4,27 @@
 # =============================================================================
 
 # ---------------------
-# Stage 1: Builder
+# Stage 1: Frontend Builder
+# ---------------------
+FROM node:20-alpine AS frontend-builder
+WORKDIR /app/client
+COPY client/package*.json ./
+RUN npm ci
+COPY client/ ./
+RUN npm run build
+
+# ---------------------
+# Stage 2: Backend Builder
 # ---------------------
 FROM node:20-alpine AS builder
-
 WORKDIR /app
-
-# Copy package files and install production dependencies
 COPY server/package*.json ./
 RUN npm ci --only=production
-
-# Copy server source code
-COPY server/ .
-
-# Generate Prisma client
+COPY server/ ./
 RUN npx prisma generate
 
 # ---------------------
-# Stage 2: Production
+# Stage 3: Production
 # ---------------------
 FROM node:20-alpine AS production
 
@@ -35,6 +38,9 @@ WORKDIR /app
 
 # Copy built application from builder stage
 COPY --from=builder /app ./
+
+# Copy built frontend files to public directory
+COPY --from=frontend-builder /app/client/dist ./public
 
 # Ensure the prisma directory exists for the SQLite database
 RUN mkdir -p prisma && chown -R appuser:appgroup /app

@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const productRoutes = require('./routes/productRoutes');
 
+const path = require('path');
 const app = express();
 
 // CORS Configuration - Allow frontend origins
@@ -27,6 +28,9 @@ app.use(cors({
 
 app.use(express.json());
 
+// Serve static frontend files from the 'public' directory
+app.use(express.static(path.join(__dirname, '../public')));
+
 // Routes
 app.use('/api/products', productRoutes);
 
@@ -39,9 +43,9 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Root Route
-app.get('/', (req, res) => {
-  res.send('ShopSmart Backend Service');
+// Catch-all route to serve the frontend (for SPA routing)
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/index.html'));
 });
 
 module.exports = app;
