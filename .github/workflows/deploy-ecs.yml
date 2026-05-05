@@ -264,6 +264,12 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ secrets.AWS_REGION }}
 
+      - name: Get AWS Account ID
+        id: aws-account
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "account_id=$ACCOUNT_ID" >> $GITHUB_OUTPUT
+
       - name: Get current task definition
         id: current-task
         env:
@@ -291,14 +297,30 @@ jobs:
             > clean-task-definition.json
 
       - name: Update task definition with new image
+        id: update-task-def
         env:
-          IMAGE_URI: ${{ needs.build-and-push.outputs.image_uri }}
+          IMAGE_URI_OUTPUT: ${{ needs.build-and-push.outputs.image_uri }}
+          ACCOUNT_ID: ${{ steps.aws-account.outputs.account_id }}
+          REGION: ${{ secrets.AWS_REGION }}
+          COMMIT_SHA: ${{ github.sha }}
         run: |
+          # Determine the final Image URI
+          IMAGE_URI=$IMAGE_URI_OUTPUT
+          if [ -z "$IMAGE_URI" ]; then
+            echo "Warning: IMAGE_URI from build-and-push was empty. Calculating fallback..."
+            IMAGE_URI="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/shopsmart-backend:${COMMIT_SHA}"
+          fi
+          
+          if [ -z "$IMAGE_URI" ] || [[ "$IMAGE_URI" == *": " ]]; then
+            echo "Error: Could not determine a valid Image URI."
+            exit 1
+          fi
+          
+          echo "Using Image URI: $IMAGE_URI"
+          
           cat clean-task-definition.json | \
             jq --arg IMAGE "$IMAGE_URI" '.containerDefinitions[0].image = $IMAGE' \
             > updated-task-definition.json
-
-          echo "Updated container image to: $IMAGE_URI"
 
       - name: Register new task definition
         id: register-task
@@ -307,6 +329,12 @@ jobs:
             --cli-input-json file://updated-task-definition.json \
             --query 'taskDefinition.taskDefinitionArn' \
             --output text)
+          
+          if [ -z "$NEW_TASK_DEF_ARN" ] || [ "$NEW_TASK_DEF_ARN" == "None" ]; then
+            echo "Error: Failed to register task definition."
+            exit 1
+          fi
+          
           echo "new_task_def_arn=$NEW_TASK_DEF_ARN" >> $GITHUB_OUTPUT
           echo "✅ Registered new task definition: $NEW_TASK_DEF_ARN"
 
