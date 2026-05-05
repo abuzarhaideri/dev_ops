@@ -36,8 +36,8 @@ WORKDIR /app
 # Copy built application from builder stage
 COPY --from=builder /app ./
 
-# Change ownership to non-root user
-RUN chown -R appuser:appgroup /app
+# Ensure the prisma directory exists for the SQLite database
+RUN mkdir -p prisma && chown -R appuser:appgroup /app
 
 # Switch to non-root user
 USER appuser
@@ -48,11 +48,12 @@ EXPOSE 5001
 # Set environment variables
 ENV PORT=5001
 ENV NODE_ENV=production
-ENV DATABASE_URL=file:./prisma/dev.db
+ENV DATABASE_URL=file:/app/prisma/dev.db
 
 # Healthcheck — verifies the service is running
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:5001/api/health || exit 1
 
 # Start the application: Run migrations then start the server
-CMD npx prisma migrate deploy && node src/index.js
+# Using the direct path to prisma binary for better reliability
+CMD ./node_modules/.bin/prisma migrate deploy && node src/index.js
