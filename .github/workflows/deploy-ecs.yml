@@ -169,20 +169,24 @@ jobs:
         id: tf-output
         run: |
           echo "Capture Terraform outputs..."
-          ECR_URL=$(terraform output -raw ecr_repository_url || echo "")
-          CLUSTER_NAME=$(terraform output -raw ecs_cluster_name || echo "shopsmart-cluster")
-          SERVICE_NAME=$(terraform output -raw ecs_service_name || echo "shopsmart-service")
+          # Try to get outputs from state, but don't fail if they aren't there
+          ECR_URL=$(terraform output -raw ecr_repository_url 2>/dev/null || echo "")
+          CLUSTER_NAME=$(terraform output -raw ecs_cluster_name 2>/dev/null || echo "shopsmart-cluster")
+          SERVICE_NAME=$(terraform output -raw ecs_service_name 2>/dev/null || echo "shopsmart-service")
           
-          # Fallback if ECR_URL is empty
-          if [ -z "$ECR_URL" ]; then
-            ACCOUNT_ID=${{ steps.aws-account.outputs.account_id }}
-            ECR_URL="${ACCOUNT_ID}.dkr.ecr.${{ secrets.AWS_REGION }}.amazonaws.com/shopsmart-backend"
-            echo "Using fallback ECR URL: $ECR_URL"
+          ACCOUNT_ID=${{ steps.aws-account.outputs.account_id }}
+          REGION=${{ secrets.AWS_REGION }}
+          
+          if [ -z "$ECR_URL" ] && [ -n "$ACCOUNT_ID" ]; then
+            ECR_URL="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/shopsmart-backend"
+            echo "ECR URL from state was empty. Using calculated fallback: $ECR_URL"
           fi
           
           echo "ecr_repository_url=$ECR_URL" >> $GITHUB_OUTPUT
           echo "ecs_cluster_name=$CLUSTER_NAME" >> $GITHUB_OUTPUT
           echo "ecs_service_name=$SERVICE_NAME" >> $GITHUB_OUTPUT
+          
+          echo "DEBUG: ecr_repository_url is [${ECR_URL}]"
         working-directory: terraform
 
   # ==========================================================================
@@ -208,6 +212,12 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ secrets.AWS_REGION }}
 
+      - name: Get AWS Account ID
+        id: aws-account
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "account_id=$ACCOUNT_ID" >> $GITHUB_OUTPUT
+
       - name: Login to Amazon ECR
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
@@ -215,13 +225,18 @@ jobs:
       - name: Build, tag, and push Docker image
         id: build
         env:
-          ECR_REPOSITORY_URL: ${{ needs.terraform.outputs.ecr_repository_url }}
+          TF_ECR_URL: ${{ needs.terraform.outputs.ecr_repository_url }}
           IMAGE_TAG: ${{ github.sha }}
+          ACCOUNT_ID: ${{ steps.aws-account.outputs.account_id }}
+          REGION: ${{ secrets.AWS_REGION }}
         run: |
+          # Use Terraform output or fallback to manual construction
+          ECR_REPOSITORY_URL=$TF_ECR_URL
           if [ -z "$ECR_REPOSITORY_URL" ]; then
-            echo "ERROR: ECR_REPOSITORY_URL is empty!"
-            exit 1
+            ECR_REPOSITORY_URL="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/shopsmart-backend"
+            echo "Using manual fallback ECR URL: $ECR_REPOSITORY_URL"
           fi
+          
           echo "Building Docker image for $ECR_REPOSITORY_URL..."
           docker build -t $ECR_REPOSITORY_URL:$IMAGE_TAG -t $ECR_REPOSITORY_URL:latest .
           
