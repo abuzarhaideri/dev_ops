@@ -17,13 +17,13 @@
     "@prisma/client": "^5.22.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "prisma": "^5.22.0"
   },
   "devDependencies": {
     "jest": "^29.7.0",
     "jest-junit": "^16.0.0",
     "nodemon": "^3.1.0",
-    "prisma": "^5.22.0",
     "supertest": "^6.3.4"
   }
 }

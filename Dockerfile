@@ -25,8 +25,8 @@ RUN npx prisma generate
 # ---------------------
 FROM node:20-alpine AS production
 
-# Install wget for healthcheck (already available on alpine, but ensure it)
-RUN apk add --no-cache wget
+# Install dependencies needed for Prisma and healthcheck
+RUN apk add --no-cache wget openssl
 
 # Create non-root user and group
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
@@ -35,9 +35,6 @@ WORKDIR /app
 
 # Copy built application from builder stage
 COPY --from=builder /app ./
-
-# Run database migrations (creates SQLite DB file)
-RUN npx prisma migrate deploy
 
 # Change ownership to non-root user
 RUN chown -R appuser:appgroup /app
@@ -57,5 +54,5 @@ ENV DATABASE_URL=file:./prisma/dev.db
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget --no-verbose --tries=1 --spider http://localhost:5001/api/health || exit 1
 
-# Start the application
-CMD ["node", "src/index.js"]
+# Start the application: Run migrations then start the server
+CMD npx prisma migrate deploy && node src/index.js
