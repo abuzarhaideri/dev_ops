@@ -43,9 +43,6 @@ jobs:
         run: npm run lint
         continue-on-error: true
 
-      - name: Install jest-junit reporter
-        run: npm install --save-dev jest-junit
-
       - name: Run tests (with retry for flaky tests)
         run: npm test -- --forceExit --ci --reporters=default --reporters=jest-junit
         env:
