@@ -1,0 +1,45 @@
+# Dependencies
+node_modules
+*/node_modules
+
+# Git
+.git
+.gitignore
+
+# Client (not needed in backend container)
+client/
+
+# Tests
+e2e/
+server/tests/
+*.test.js
+*.test.jsx
+*.spec.js
+
+# IDE & OS
+.vscode
+.idea
+.DS_Store
+
+# CI/CD
+.github/
+terraform/
+
+# Build artifacts
+dist/
+build/
+coverage/
+playwright-report/
+test-results/
+blob-report/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Misc
+*.md
+LICENSE
+render.yaml
+playwright.config.js

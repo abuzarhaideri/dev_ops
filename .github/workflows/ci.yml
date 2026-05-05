@@ -43,8 +43,22 @@ jobs:
         run: npm run lint
         continue-on-error: true
 
+      - name: Install jest-junit reporter
+        run: npm install --save-dev jest-junit
+
       - name: Run tests (with retry for flaky tests)
-        run: npm test -- --forceExit
+        run: npm test -- --forceExit --ci --reporters=default --reporters=jest-junit
+        env:
+          JEST_JUNIT_OUTPUT_DIR: ./test-reports
+          JEST_JUNIT_OUTPUT_NAME: backend-report.xml
+
+      - name: Upload backend test report
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: backend-test-report
+          path: server/test-reports/
+          retention-days: 14
 
   # ============================================================
   # Frontend Unit Tests & Build
@@ -74,7 +88,15 @@ jobs:
         continue-on-error: true
 
       - name: Run tests
-        run: npm test -- --run
+        run: npx vitest run --reporter=default --reporter=junit --outputFile=test-reports/frontend-report.xml
+
+      - name: Upload frontend test report
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: frontend-test-report
+          path: client/test-reports/
+          retention-days: 14
 
       - name: Build
         run: npm run build

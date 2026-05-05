@@ -11,3 +11,13 @@ coverage
 playwright-report/
 test-results/
 blob-report/
+
+# Terraform
+*.tfstate
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+terraform/tfplan
+
+# Test reports
+test-reports/

@@ -1,0 +1,324 @@
+# =============================================================================
+# ShopSmart — End-to-End CI/CD Pipeline
+# Push → Tests → Terraform → Docker Build & Push → Deploy to ECS Fargate
+# =============================================================================
+
+name: Deploy to ECS Fargate
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  APP_NAME: shopsmart
+  CONTAINER_PORT: 5001
+
+jobs:
+  # ==========================================================================
+  # Phase 1 — Testing (Unit + Integration Tests with Reports)
+  # ==========================================================================
+  test:
+    name: "Phase 1: Run Tests"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ---- Backend Tests (Jest) ----
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm ci
+        working-directory: server
+
+      - name: Generate Prisma Client
+        run: npx prisma generate
+        working-directory: server
+
+      - name: Run database migrations
+        run: npx prisma migrate deploy
+        working-directory: server
+        env:
+          DATABASE_URL: file:./test.db
+
+      - name: Run backend tests
+        run: npm test -- --forceExit --ci --reporters=default --reporters=jest-junit
+        working-directory: server
+        env:
+          DATABASE_URL: file:./test.db
+          JEST_JUNIT_OUTPUT_DIR: ./test-reports
+          JEST_JUNIT_OUTPUT_NAME: backend-report.xml
+        continue-on-error: false
+
+      # ---- Frontend Tests (Vitest) ----
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: client
+
+      - name: Run frontend tests
+        run: npx vitest run --reporter=default --reporter=junit --outputFile=test-reports/frontend-report.xml
+        working-directory: client
+        continue-on-error: false
+
+      # ---- Upload Test Reports ----
+      - name: Upload backend test report
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: backend-test-report
+          path: server/test-reports/
+          retention-days: 14
+
+      - name: Upload frontend test report
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: frontend-test-report
+          path: client/test-reports/
+          retention-days: 14
+
+  # ==========================================================================
+  # Phase 2 — Infrastructure Provisioning (Terraform)
+  # ==========================================================================
+  terraform:
+    name: "Phase 2: Terraform Apply"
+    runs-on: ubuntu-latest
+    needs: test
+
+    outputs:
+      ecr_repository_url: ${{ steps.tf-output.outputs.ecr_repository_url }}
+      ecs_cluster_name: ${{ steps.tf-output.outputs.ecs_cluster_name }}
+      ecs_service_name: ${{ steps.tf-output.outputs.ecs_service_name }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.0"
+          terraform_wrapper: false
+
+      - name: Get AWS Account ID
+        id: aws-account
+        run: |
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "account_id=$ACCOUNT_ID" >> $GITHUB_OUTPUT
+          echo "lab_role_arn=arn:aws:iam::${ACCOUNT_ID}:role/LabRole" >> $GITHUB_OUTPUT
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: terraform
+
+      - name: Terraform Validate
+        run: terraform validate
+        working-directory: terraform
+
+      - name: Terraform Plan
+        run: |
+          terraform plan \
+            -var="aws_region=${{ secrets.AWS_REGION }}" \
+            -var="lab_role_arn=${{ steps.aws-account.outputs.lab_role_arn }}" \
+            -var="ecr_image=" \
+            -out=tfplan
+        working-directory: terraform
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+        working-directory: terraform
+
+      - name: Get Terraform Outputs
+        id: tf-output
+        run: |
+          echo "ecr_repository_url=$(terraform output -raw ecr_repository_url)" >> $GITHUB_OUTPUT
+          echo "ecs_cluster_name=$(terraform output -raw ecs_cluster_name)" >> $GITHUB_OUTPUT
+          echo "ecs_service_name=$(terraform output -raw ecs_service_name)" >> $GITHUB_OUTPUT
+        working-directory: terraform
+
+  # ==========================================================================
+  # Phase 3 — Container Build and Push to ECR
+  # ==========================================================================
+  build-and-push:
+    name: "Phase 3: Docker Build & Push"
+    runs-on: ubuntu-latest
+    needs: terraform
+
+    outputs:
+      image_uri: ${{ steps.build.outputs.image_uri }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push Docker image
+        id: build
+        env:
+          ECR_REPOSITORY_URL: ${{ needs.terraform.outputs.ecr_repository_url }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          echo "Building Docker image..."
+          docker build -t $ECR_REPOSITORY_URL:$IMAGE_TAG -t $ECR_REPOSITORY_URL:latest .
+
+          echo "Pushing Docker image..."
+          docker push $ECR_REPOSITORY_URL:$IMAGE_TAG
+          docker push $ECR_REPOSITORY_URL:latest
+
+          echo "image_uri=$ECR_REPOSITORY_URL:$IMAGE_TAG" >> $GITHUB_OUTPUT
+          echo "✅ Image pushed: $ECR_REPOSITORY_URL:$IMAGE_TAG"
+
+  # ==========================================================================
+  # Phase 4 — Deploy to ECS Fargate
+  # ==========================================================================
+  deploy:
+    name: "Phase 4: Deploy to ECS Fargate"
+    runs-on: ubuntu-latest
+    needs: [terraform, build-and-push]
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Get current task definition
+        id: current-task
+        env:
+          CLUSTER: ${{ needs.terraform.outputs.ecs_cluster_name }}
+          SERVICE: ${{ needs.terraform.outputs.ecs_service_name }}
+        run: |
+          TASK_DEF_ARN=$(aws ecs describe-services \
+            --cluster $CLUSTER \
+            --services $SERVICE \
+            --query 'services[0].taskDefinition' \
+            --output text)
+          echo "task_def_arn=$TASK_DEF_ARN" >> $GITHUB_OUTPUT
+
+      - name: Download task definition
+        id: download-task-def
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition ${{ steps.current-task.outputs.task_def_arn }} \
+            --query 'taskDefinition' \
+            --output json > task-definition.json
+
+          # Remove fields that aren't allowed in register-task-definition
+          cat task-definition.json | \
+            jq 'del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .compatibilities, .registeredAt, .registeredBy)' \
+            > clean-task-definition.json
+
+      - name: Update task definition with new image
+        env:
+          IMAGE_URI: ${{ needs.build-and-push.outputs.image_uri }}
+        run: |
+          cat clean-task-definition.json | \
+            jq --arg IMAGE "$IMAGE_URI" '.containerDefinitions[0].image = $IMAGE' \
+            > updated-task-definition.json
+
+          echo "Updated container image to: $IMAGE_URI"
+
+      - name: Register new task definition
+        id: register-task
+        run: |
+          NEW_TASK_DEF_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://updated-task-definition.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+          echo "new_task_def_arn=$NEW_TASK_DEF_ARN" >> $GITHUB_OUTPUT
+          echo "✅ Registered new task definition: $NEW_TASK_DEF_ARN"
+
+      - name: Update ECS service
+        env:
+          CLUSTER: ${{ needs.terraform.outputs.ecs_cluster_name }}
+          SERVICE: ${{ needs.terraform.outputs.ecs_service_name }}
+          TASK_DEF: ${{ steps.register-task.outputs.new_task_def_arn }}
+        run: |
+          aws ecs update-service \
+            --cluster $CLUSTER \
+            --service $SERVICE \
+            --task-definition $TASK_DEF \
+            --force-new-deployment \
+            --query 'service.serviceName' \
+            --output text
+
+          echo "✅ ECS service updated with new deployment"
+
+      - name: Wait for service stability
+        env:
+          CLUSTER: ${{ needs.terraform.outputs.ecs_cluster_name }}
+          SERVICE: ${{ needs.terraform.outputs.ecs_service_name }}
+        run: |
+          echo "Waiting for ECS service to stabilize (this may take 2-5 minutes)..."
+          aws ecs wait services-stable \
+            --cluster $CLUSTER \
+            --services $SERVICE
+          echo "✅ ECS service is stable"
+
+      - name: Verify deployment — get running task public IP
+        env:
+          CLUSTER: ${{ needs.terraform.outputs.ecs_cluster_name }}
+          SERVICE: ${{ needs.terraform.outputs.ecs_service_name }}
+        run: |
+          # Get the running task ARN
+          TASK_ARN=$(aws ecs list-tasks \
+            --cluster $CLUSTER \
+            --service-name $SERVICE \
+            --desired-status RUNNING \
+            --query 'taskArns[0]' \
+            --output text)
+
+          if [ "$TASK_ARN" = "None" ] || [ -z "$TASK_ARN" ]; then
+            echo "❌ No running tasks found"
+            exit 1
+          fi
+
+          # Get the ENI (network interface) attached to the task
+          ENI_ID=$(aws ecs describe-tasks \
+            --cluster $CLUSTER \
+            --tasks $TASK_ARN \
+            --query 'tasks[0].attachments[0].details[?name==`networkInterfaceId`].value' \
+            --output text)
+
+          # Get the public IP
+          PUBLIC_IP=$(aws ec2 describe-network-interfaces \
+            --network-interface-ids $ENI_ID \
+            --query 'NetworkInterfaces[0].Association.PublicIp' \
+            --output text)
+
+          echo "==========================================="
+          echo "✅ Deployment Successful!"
+          echo "==========================================="
+          echo "🌐 Service URL: http://$PUBLIC_IP:${{ env.CONTAINER_PORT }}"
+          echo "❤️  Health Check: http://$PUBLIC_IP:${{ env.CONTAINER_PORT }}/api/health"
+          echo "==========================================="
