@@ -26,6 +26,8 @@ app.use(cors({
   credentials: true
 }));
 
+const fs = require('fs');
+
 app.use(express.json());
 
 // Serve static frontend files from the 'public' directory
@@ -43,9 +45,24 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Root Route Fallback (useful for tests when frontend is not built)
+app.get('/', (req, res) => {
+  const indexPath = path.join(__dirname, '../public/index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.send('ShopSmart Backend Service');
+  }
+});
+
 // Catch-all route to serve the frontend (for SPA routing)
 app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../public/index.html'));
+  const indexPath = path.join(__dirname, '../public/index.html');
+  if (fs.existsSync(indexPath)) {
+    res.sendFile(indexPath);
+  } else {
+    res.status(404).json({ error: 'Not Found' });
+  }
 });
 
 module.exports = app;
