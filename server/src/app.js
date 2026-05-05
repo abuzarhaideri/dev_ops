@@ -58,16 +58,24 @@ app.get('/', (req, res) => {
 });
 
 // Catch-all route to serve the frontend (for SPA routing)
-// Only serve index.html if the request doesn't look like a static asset
 app.get('*', (req, res) => {
+  // Don't serve index.html for API routes
   if (req.url.startsWith('/api')) {
     return res.status(404).json({ error: 'API route not found' });
   }
 
   if (fs.existsSync(indexPath)) {
-    res.sendFile(indexPath);
+    res.sendFile(indexPath, (err) => {
+      if (err) {
+        console.error('Error sending index.html:', err);
+        if (!res.headersSent) {
+          res.status(500).send('Error loading the application');
+        }
+      }
+    });
   } else {
-    res.status(404).send('Not Found');
+    console.error('index.html not found at:', indexPath);
+    res.status(404).send('Application not found. Please check build artifacts.');
   }
 });
 

@@ -37,13 +37,13 @@ RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 WORKDIR /app
 
 # Copy built application from builder stage
-COPY --from=builder /app ./
+COPY --from=builder /app /app
 
 # Copy built frontend files to public directory
-COPY --from=frontend-builder /app/client/dist ./public
+COPY --from=frontend-builder /app/client/dist /app/public
 
-# Ensure the prisma directory exists for the SQLite database
-RUN mkdir -p prisma && chown -R appuser:appgroup /app
+# Ensure the prisma directory exists for the SQLite database and fix permissions for everything
+RUN mkdir -p /app/prisma && chown -R appuser:appgroup /app
 
 # Switch to non-root user
 USER appuser
