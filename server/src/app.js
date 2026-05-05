@@ -27,11 +27,16 @@ app.use(cors({
 }));
 
 const fs = require('fs');
+const path = require('path');
 
 app.use(express.json());
 
-// Serve static frontend files from the 'public' directory
-app.use(express.static(path.join(__dirname, '../public')));
+// Define paths
+const publicPath = path.resolve(__dirname, '..', 'public');
+const indexPath = path.join(publicPath, 'index.html');
+
+// Serve static frontend files
+app.use(express.static(publicPath));
 
 // Routes
 app.use('/api/products', productRoutes);
@@ -45,9 +50,8 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Root Route Fallback (useful for tests when frontend is not built)
+// Root Route Fallback
 app.get('/', (req, res) => {
-  const indexPath = path.join(__dirname, '../public/index.html');
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
@@ -56,12 +60,16 @@ app.get('/', (req, res) => {
 });
 
 // Catch-all route to serve the frontend (for SPA routing)
+// Only serve index.html if the request doesn't look like a static asset
 app.get('*', (req, res) => {
-  const indexPath = path.join(__dirname, '../public/index.html');
+  if (req.url.startsWith('/api')) {
+    return res.status(404).json({ error: 'API route not found' });
+  }
+
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
   } else {
-    res.status(404).json({ error: 'Not Found' });
+    res.status(404).send('Not Found');
   }
 });
 
