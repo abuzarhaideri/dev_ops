@@ -143,6 +143,10 @@ jobs:
           terraform import -var="aws_region=${{ secrets.AWS_REGION }}" -var="lab_role_arn=${{ steps.aws-account.outputs.lab_role_arn }}" aws_ecr_repository.app shopsmart-backend || echo "ECR repo not found, skipping import"
           terraform import -var="aws_region=${{ secrets.AWS_REGION }}" -var="lab_role_arn=${{ steps.aws-account.outputs.lab_role_arn }}" aws_cloudwatch_log_group.app /ecs/shopsmart-backend || echo "Log group not found, skipping import"
           
+          # ECS Cluster and Service import
+          terraform import -var="aws_region=${{ secrets.AWS_REGION }}" -var="lab_role_arn=${{ steps.aws-account.outputs.lab_role_arn }}" aws_ecs_cluster.main shopsmart-cluster || echo "ECS cluster not found, skipping import"
+          terraform import -var="aws_region=${{ secrets.AWS_REGION }}" -var="lab_role_arn=${{ steps.aws-account.outputs.lab_role_arn }}" aws_ecs_service.app shopsmart-cluster/shopsmart-service || echo "ECS service not found, skipping import"
+          
           # Security Group lookup and import
           SG_ID=$(aws ec2 describe-security-groups --filters Name=group-name,Values=shopsmart-ecs-sg --query "SecurityGroups[0].GroupId" --output text)
           if [ "$SG_ID" != "None" ] && [ -n "$SG_ID" ]; then
