@@ -44,10 +44,9 @@ jobs:
         continue-on-error: true
 
       - name: Run tests (with retry for flaky tests)
-        run: npm test -- --forceExit --ci --reporters=default --reporters=jest-junit
-        env:
-          JEST_JUNIT_OUTPUT_DIR: ./test-reports
-          JEST_JUNIT_OUTPUT_NAME: backend-report.xml
+        run: |
+          mkdir -p test-reports
+          npm test -- --forceExit --ci --json --outputFile=test-reports/backend-report.json
 
       - name: Upload backend test report
         uses: actions/upload-artifact@v4

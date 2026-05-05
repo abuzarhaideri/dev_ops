@@ -50,12 +50,12 @@ jobs:
           DATABASE_URL: file:./test.db
 
       - name: Run backend tests
-        run: npm test -- --forceExit --ci --reporters=default --reporters=jest-junit
+        run: |
+          mkdir -p test-reports
+          npm test -- --forceExit --ci --json --outputFile=test-reports/backend-report.json
         working-directory: server
         env:
           DATABASE_URL: file:./test.db
-          JEST_JUNIT_OUTPUT_DIR: ./test-reports
-          JEST_JUNIT_OUTPUT_NAME: backend-report.xml
         continue-on-error: false
 
       # ---- Frontend Tests (Vitest) ----
