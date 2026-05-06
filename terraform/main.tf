@@ -12,6 +12,14 @@ terraform {
       version = "~> 5.0"
     }
   }
+
+  backend "s3" {
+    bucket         = "shopsmart-terraform-state-050827604614"
+    key            = "terraform.tfstate"
+    region         = "us-east-1"
+    encrypt        = true
+    dynamodb_table = "terraform-lock"
+  }
 }
 
 provider "aws" {
@@ -249,6 +257,26 @@ resource "aws_ecs_service" "app" {
 
   tags = {
     Name      = "${var.app_name}-service"
+    ManagedBy = "terraform"
+  }
+}
+
+# -----------------------------------------------------------------------------
+# DynamoDB Table — Terraform State Locking
+# -----------------------------------------------------------------------------
+
+resource "aws_dynamodb_table" "terraform_lock" {
+  name         = "terraform-lock"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "LockID"
+
+  attribute {
+    name = "LockID"
+    type = "S"
+  }
+
+  tags = {
+    Name      = "terraform-lock"
     ManagedBy = "terraform"
   }
 }

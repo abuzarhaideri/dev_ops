@@ -134,26 +134,6 @@ jobs:
       - name: Terraform Plan
         id: plan
         run: |
-          # Attempt to import existing resources if they exist (ignore errors if they don't)
-          # This handles the "AlreadyExists" errors in ephemeral CI environments
-          ACCOUNT_ID=${{ steps.aws-account.outputs.account_id }}
-          
-          echo "Checking for existing resources to import..."
-          terraform import -var="aws_region=${{ secrets.AWS_REGION }}" -var="lab_role_arn=${{ steps.aws-account.outputs.lab_role_arn }}" aws_s3_bucket.artifacts shopsmart-artifacts-${ACCOUNT_ID} || echo "S3 bucket not found, skipping import"
-          terraform import -var="aws_region=${{ secrets.AWS_REGION }}" -var="lab_role_arn=${{ steps.aws-account.outputs.lab_role_arn }}" aws_ecr_repository.app shopsmart-backend || echo "ECR repo not found, skipping import"
-          terraform import -var="aws_region=${{ secrets.AWS_REGION }}" -var="lab_role_arn=${{ steps.aws-account.outputs.lab_role_arn }}" aws_cloudwatch_log_group.app /ecs/shopsmart-backend || echo "Log group not found, skipping import"
-          
-          # ECS Cluster and Service import
-          terraform import -var="aws_region=${{ secrets.AWS_REGION }}" -var="lab_role_arn=${{ steps.aws-account.outputs.lab_role_arn }}" aws_ecs_cluster.main shopsmart-cluster || echo "ECS cluster not found, skipping import"
-          terraform import -var="aws_region=${{ secrets.AWS_REGION }}" -var="lab_role_arn=${{ steps.aws-account.outputs.lab_role_arn }}" aws_ecs_service.app shopsmart-cluster/shopsmart-service || echo "ECS service not found, skipping import"
-          
-          # Security Group lookup and import
-          SG_ID=$(aws ec2 describe-security-groups --filters Name=group-name,Values=shopsmart-ecs-sg --query "SecurityGroups[0].GroupId" --output text)
-          if [ "$SG_ID" != "None" ] && [ -n "$SG_ID" ]; then
-            echo "Found existing Security Group: $SG_ID. Importing..."
-            terraform import -var="aws_region=${{ secrets.AWS_REGION }}" -var="lab_role_arn=${{ steps.aws-account.outputs.lab_role_arn }}" aws_security_group.ecs $SG_ID || echo "SG import failed, skipping"
-          fi
-          
           terraform plan \
             -var="aws_region=${{ secrets.AWS_REGION }}" \
             -var="lab_role_arn=${{ steps.aws-account.outputs.lab_role_arn }}" \
